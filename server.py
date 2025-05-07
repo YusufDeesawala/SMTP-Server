@@ -1,93 +1,91 @@
-# Give access to third part apps in gmail security settings
-# Install smtp library using 'pip install secure-smtplib' command in command prompt 
-
-
-import smtplib,socket
+import smtplib
+import socket
+from getpass import getpass
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 
 def setup_server():
-    # set up the SMTP server
-    server = smtplib.SMTP(host='smtp.gmail.com', port=587)
-    server.starttls()
-    return server
+    try:
+        server = smtplib.SMTP(host='smtp.gmail.com', port=587)
+        server.starttls()  # Enable TLS
+        return server
+    except Exception as e:
+        raise Exception(f"Failed to set up server: {e}")
 
 def login(server):
-    address = input("Sender Email : ").strip()
-    password = input("password: ").strip() #input().strip()
-    server.login(address,password)
-    return address
-
-def create_email(address):
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-    
-    recipient_email = input("Enter recipient email: ").strip()
-    msg = MIMEMultipart()       # create a message
-
-    # setup the parameters of the message
-    msg['From'] = address
-    msg['To'] = recipient_email
-    msg['Subject']=input("Enter subject of the message: ").strip()
-
-    message = input("Enter message: ").strip()
-
-    # add in the message body
-    msg.attach(MIMEText(message, 'plain'))
-    attach = input( "Would you like to send an attachment ? Yes/No : ").strip()
-    attaching = False
-    num_attach=0
-    if attach.lower()=='yes':
-        attaching = True
-        num_attach = int(input("Enter number of attachments :"))
-    i = 0
-    while i<num_attach:
-        if attaching:
-            add_attachment(msg)    
-        else:
-            print("No attachment added")
-        i+=1
-    return msg
-
-def send(server,msg):
-    from email import message
-    # send the message via the server set up earlier.
-    server.send_message(msg)
-    del msg
-    print("Successful")
+    address = input("Sender Email: ").strip()
+    password = getpass("Password: ")  # Secure password input
+    try:
+        server.login(address, password)
+        return address
+    except smtplib.SMTPAuthenticationError:
+        raise smtplib.SMTPAuthenticationError("Authentication failed. Check email, password, or App Password settings.")
 
 def add_attachment(msg):
-    from email.mime.base import MIMEBase
-    from email import encoders
-
-    # open the file to be sent 
     filename = input("Enter path of the attachment file: ").strip()
-    file = open(filename, "rb")
-    
-    # instance of MIMEBase and named as attachment
-    attachment = MIMEBase('application', 'octet-stream')
-    
-    # To change the payload into encoded form
-    attachment.set_payload((file).read())
-    
-    # encode into base64
-    encoders.encode_base64(attachment)
-    attachment.add_header(input("Add header to the attachment: ").strip(),"client")
-    
-    # attach the instance 'attachment' to instance 'msg'
-    msg.attach(attachment)
-    print("Attachment has been added")
+    try:
+        with open(filename, "rb") as file:
+            attachment = MIMEBase('application', 'octet-stream')
+            attachment.set_payload(file.read())
+        encoders.encode_base64(attachment)
+        # Add standard header for attachments
+        attachment.add_header('Content-Disposition', f'attachment; filename="{filename.split("/")[-1]}"')
+        msg.attach(attachment)
+        print("Attachment added successfully")
+    except FileNotFoundError:
+        print(f"File {filename} not found")
+    except Exception as e:
+        print(f"Failed to attach file: {e}")
 
-try:
-    server = setup_server()
-    address  = login(server)
-    msg = create_email(address)
-    send(server,msg)
-except socket.gaierror:
-    print("No Internet Connection")
-except smtplib.SMTPAuthenticationError :
-    # If password or username is wrong
-    # If less secure app access not granted in google account settings
-    print("Authentication Failed")
-except smtplib.SMTPRecipientsRefused :
-   print("Invalid Recipient Email")
-# except Exception:
-#     print("Sending Failed.")
+def create_email(address):
+    recipient_email = input("Enter recipient email: ").strip()
+    msg = MIMEMultipart()
+    msg['From'] = address
+    msg['To'] = recipient_email
+    msg['Subject'] = input("Enter subject of the message: ").strip()
+    message = input("Enter message: ").strip()
+    msg.attach(MIMEText(message, 'plain'))
+
+    attach = input("Would you like to send an attachment? Yes/No: ").strip()
+    if attach.lower() == 'yes':
+        try:
+            num_attach = int(input("Enter number of attachments: "))
+            for _ in range(num_attach):
+                add_attachment(msg)
+        except ValueError:
+            print("Invalid number of attachments")
+    return msg
+
+def send(server, msg):
+    try:
+        server.send_message(msg)
+        print("Email sent successfully")
+    except smtplib.SMTPRecipientsRefused:
+        raise smtplib.SMTPRecipientsRefused("Invalid recipient email")
+    except Exception as e:
+        raise Exception(f"Failed to send email: {e}")
+
+def main():
+    try:
+        server = setup_server()
+        address = login(server)
+        msg = create_email(address)
+        send(server, msg)
+    except socket.gaierror:
+        print("No Internet Connection")
+    except smtplib.SMTPAuthenticationError as e:
+        print(e)
+    except smtplib.SMTPRecipientsRefused as e:
+        print(e)
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    finally:
+        try:
+            server.quit()  # Close the server connection
+        except:
+            pass
+
+if __name__ == "__main__":
+    main()
