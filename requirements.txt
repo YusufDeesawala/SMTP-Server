@@ -1,2 +1,2 @@
 secure-smtplib
-email
+email-to
