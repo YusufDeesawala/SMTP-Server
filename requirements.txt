@@ -1,2 +1,5 @@
 secure-smtplib
 email-to
+flask
+pymongo
+bcrypt
