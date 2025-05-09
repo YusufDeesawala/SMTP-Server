@@ -1,6 +1,10 @@
 secure-smtplib
 email-to
 flask
-pymongo
+flask_sqlalchemy
 bcrypt
 python-dotenv
+cryptography
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
