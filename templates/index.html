@@ -6,53 +6,54 @@
     <title>Email Sender</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 flex items-center justify-center min-h-screen">
-    <div class="bg-white p-8 rounded-lg shadow-lg w-full max-w-md">
-        <h1 class="text-2xl font-bold mb-6 text-center">Send Email</h1>
-        <p class="text-sm text-gray-600 mb-4">Logged in as: {{ user_email }}</p>
-        <a href="{{ url_for('logout') }}" class="text-blue-600 hover:underline mb-4 block">Logout</a>
+<body class="bg-gradient-to-r from-blue-500 to-purple-600 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-lg">
+        <h1 class="text-3xl font-bold text-gray-800 text-center mb-6">Send Email</h1>
+        <p class="text-sm text-gray-600 mb-4 text-center">Logged in as: {{ user_email }}</p>
+        <a href="{{ url_for('logout') }}" class="text-blue-600 hover:underline mb-4 block text-center">Logout</a>
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div class="mb-4 p-4 rounded {{ 'bg-green-100 text-green-700' if category == 'success' else 'bg-red-100 text-red-700' }}">
+                    <div class="mb-4 p-4 rounded-lg {{ 'bg-green-100 text-green-800' if category == 'success' else 'bg-red-100 text-red-800' }} text-sm">
                         {{ message }}
                     </div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
-        <form method="POST" enctype="multipart/form-data" class="space-y-4">
+        <form method="POST" enctype="multipart/form-data" class="space-y-5">
             <div>
                 <label for="recipient_email" class="block text-sm font-medium text-gray-700">Recipient Email</label>
                 <input type="email" id="recipient_email" name="recipient_email" required
-                       class="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                       pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$"
+                       class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
+                       placeholder="recipient@example.com">
             </div>
             <div>
                 <label for="reply_to" class="block text-sm font-medium text-gray-700">Reply-To Email (Optional)</label>
                 <input type="email" id="reply_to" name="reply_to"
-                       class="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                       pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$"
+                       class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
+                       placeholder="replyto@example.com">
             </div>
             <div>
                 <label for="subject" class="block text-sm font-medium text-gray-700">Subject</label>
                 <input type="text" id="subject" name="subject" required
-                       class="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                       class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
+                       placeholder="Email subject">
             </div>
             <div>
                 <label for="message" class="block text-sm font-medium text-gray-700">Message</label>
-                <textarea id="message" name="message" rows="4" required
-                          class="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
-            </div>
-            <div>
-                <label for="app_password" class="block text-sm font-medium text-gray-700">Gmail App Password</label>
-                <input type="password" id="app_password" name="app_password" required
-                       class="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <textarea id="message" name="message" rows="5" required
+                          class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
+                          placeholder="Your message here..."></textarea>
             </div>
             <div>
                 <label for="attachments" class="block text-sm font-medium text-gray-700">Attachments</label>
                 <input type="file" id="attachments" name="attachments" multiple
-                       class="mt-1 block w-full p-2 border border-gray-300 rounded-md">
+                       class="mt-1 block w-full p-3 border border-gray-300 rounded-lg text-gray-600">
             </div>
             <button type="submit"
-                    class="w-full bg-blue-600 text-white p-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    class="w-full bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200">
                 Send Email
             </button>
         </form>
