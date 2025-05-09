@@ -9,17 +9,32 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 import re
+import urllib.parse
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')  # Load secret key from env
 
-# MongoDB setup
-mongo_uri = os.getenv('MONGO_URI')
-if not mongo_uri:
-    raise ValueError("MONGO_URI must be set in environment variables")
-client = MongoClient(mongo_uri)
-db = client['email_app']
-users_collection = db['users']
+# MongoDB setup with URL-encoded credentials from .env
+mongo_username = urllib.parse.quote_plus(os.getenv('MONGO_USERNAME', ''))
+mongo_password = urllib.parse.quote_plus(os.getenv('MONGO_PASSWORD', ''))
+mongo_cluster = os.getenv('MONGO_CLUSTER', 'smtp-server.a6jfpqs.mongodb.net')
+mongo_db = os.getenv('MONGO_DB', 'email_app')
+
+if not mongo_username or not mongo_password:
+    raise ValueError("MONGO_USERNAME and MONGO_PASSWORD must be set in .env file")
+
+mongo_uri = f'mongodb+srv://{mongo_username}:{mongo_password}@{mongo_cluster}/{mongo_db}?retryWrites=true&w=majority'
+
+try:
+    client = MongoClient(mongo_uri)
+    db = client[mongo_db]
+    users_collection = db['users']
+except Exception as e:
+    raise ValueError(f"Failed to connect to MongoDB: {e}")
 
 def setup_server():
     try:
@@ -133,7 +148,7 @@ def index():
     if 'user_id' not in session:
         return redirect(url_for('login'))
     
-    user = users_collection.find_one({'_id': session['user_id']})
+    user = users_collection.find_one({'email': session.get('user_email')})
     if not user:
         session.pop('user_id', None)
         flash('User not found. Please log in again.', 'error')

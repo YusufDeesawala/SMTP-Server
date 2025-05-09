@@ -3,3 +3,4 @@ email-to
 flask
 pymongo
 bcrypt
+python-dotenv
