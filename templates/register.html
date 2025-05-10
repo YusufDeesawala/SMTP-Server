@@ -5,38 +5,194 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Register - Email Sender</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .dark-input {
+            background-color: #1e2131;
+            border-color: #3d4154;
+            color: #e2e8f0;
+        }
+        .dark-input::placeholder {
+            color: #6b7280;
+        }
+        .dark-input:focus {
+            border-color: #6366f1;
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+        }
+        .theme-toggle {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+        }
+    </style>
 </head>
-<body class="bg-gradient-to-r from-blue-500 to-purple-600 min-h-screen flex items-center justify-center p-4">
-    <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md">
-        <h1 class="text-3xl font-bold text-gray-800 text-center mb-6">Register</h1>
+<body class="bg-gradient-to-br from-gray-900 to-indigo-900 min-h-screen flex items-center justify-center p-4 text-gray-200">
+    <div class="bg-gray-800 rounded-xl shadow-2xl p-8 w-full max-w-md relative border border-gray-700">
+        <!-- Theme Toggle -->
+        <button id="themeToggle" class="theme-toggle p-2 rounded-full bg-gray-700 hover:bg-gray-600 transition">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 10a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 10a1 1 0 01-1 1H2a1 1 0 110-2h1a1 1 0 011 1z" clip-rule="evenodd" />
+            </svg>
+        </button>
+
+        <div class="flex items-center justify-center mb-8">
+            <div class="bg-gray-700 p-3 rounded-full mr-4">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                </svg>
+            </div>
+            <h1 class="text-3xl font-bold text-indigo-300">Register</h1>
+        </div>
+        
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div class="mb-4 p-4 rounded-lg {{ 'bg-green-100 text-green-800' if category == 'success' else 'bg-red-100 text-red-800' }} text-sm">
-                        {{ message }}
+                    <div class="mb-4 p-4 rounded-lg {{ 'bg-green-800 text-green-200' if category == 'success' else 'bg-red-800 text-red-200' }} text-sm">
+                        <div class="flex">
+                            {% if category == 'success' %}
+                                <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                </svg>
+                            {% else %}
+                                <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                                </svg>
+                            {% endif %}
+                            {{ message }}
+                        </div>
                     </div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
-        <form method="POST" class="space-y-5">
-            <div>
-                <label for="email" class="block text-sm font-medium text-gray-700">Email</label>
-                <input type="email" id="email" name="email" required
-                       pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$"
-                       class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
-                       placeholder="your.email@example.com">
+
+        <form method="POST" class="space-y-6">
+            <div class="space-y-1">
+                <label for="email" class="block text-sm font-medium text-gray-300">Email</label>
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                    </div>
+                    <input type="email" id="email" name="email" required
+                           pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$"
+                           class="dark-input pl-10 block w-full p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-200"
+                           placeholder="your.email@example.com">
+                </div>
             </div>
+
             <button type="submit"
-                    class="w-full bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200">
-                Register
+                    class="relative w-full bg-indigo-600 hover:bg-indigo-700 focus:bg-indigo-700 text-white p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-200 group overflow-hidden">
+                <span class="absolute right-0 top-0 h-full w-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 transform group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                </span>
+                <span class="group-hover:mr-5 transition-all">Register</span>
             </button>
         </form>
-        <p class="mt-4 text-sm text-gray-600 text-center">
-            Already have an account? <a href="{{ url_for('login') }}" class="text-blue-600 hover:underline">Log In</a>
-        </p>
-        <p class="mt-2 text-sm text-gray-600 text-center">
-            You’ll be prompted to authorize Gmail access after login. <a href="https://support.google.com/accounts/answer/3466521" target="_blank" class="text-blue-600 hover:underline">Learn more</a>.
-        </p>
+
+        <div class="mt-6 text-sm text-gray-400 text-center">
+            <p class="mb-2">
+                Already have an account? <a href="{{ url_for('login') }}" class="text-indigo-400 hover:text-indigo-300 hover:underline transition">Log In</a>
+            </p>
+            <div class="mt-4 bg-gray-700 rounded-lg p-4 border border-gray-600">
+                <div class="flex items-start">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-indigo-400 mr-2 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p>You'll be prompted to authorize Gmail access after login. <a href="https://support.google.com/accounts/answer/3466521" target="_blank" class="text-indigo-400 hover:text-indigo-300 hover:underline transition">Learn more</a>.</p>
+                </div>
+            </div>
+        </div>
     </div>
+
+    <script>
+        // Theme toggling functionality
+        const themeToggle = document.getElementById('themeToggle');
+        const body = document.body;
+        const container = document.querySelector('.bg-gray-800');
+        const inputs = document.querySelectorAll('.dark-input');
+        const labels = document.querySelectorAll('label');
+        const heading = document.querySelector('h1');
+        const infoBox = document.querySelector('.bg-gray-700.rounded-lg');
+        const links = document.querySelectorAll('a');
+        
+        themeToggle.addEventListener('click', () => {
+            // Toggle body background
+            if (body.classList.contains('bg-gradient-to-br')) {
+                body.classList.remove('bg-gradient-to-br', 'from-gray-900', 'to-indigo-900', 'text-gray-200');
+                body.classList.add('bg-gradient-to-r', 'from-blue-100', 'to-indigo-100', 'text-gray-800');
+            } else {
+                body.classList.remove('bg-gradient-to-r', 'from-blue-100', 'to-indigo-100', 'text-gray-800');
+                body.classList.add('bg-gradient-to-br', 'from-gray-900', 'to-indigo-900', 'text-gray-200');
+            }
+            
+            // Toggle container
+            container.classList.toggle('bg-gray-800');
+            container.classList.toggle('bg-white');
+            container.classList.toggle('border-gray-700');
+            container.classList.toggle('border-gray-200');
+            
+            // Toggle inputs
+            inputs.forEach(input => {
+                if (input.classList.contains('dark-input')) {
+                    input.style.backgroundColor = '#f9fafb';
+                    input.style.borderColor = '#e5e7eb';
+                    input.style.color = '#1f2937';
+                } else {
+                    input.style.backgroundColor = '#1e2131';
+                    input.style.borderColor = '#3d4154';
+                    input.style.color = '#e2e8f0';
+                }
+                input.classList.toggle('dark-input');
+            });
+            
+            // Toggle labels
+            labels.forEach(label => {
+                label.classList.toggle('text-gray-300');
+                label.classList.toggle('text-gray-700');
+            });
+            
+            // Toggle heading
+            heading.classList.toggle('text-indigo-300');
+            heading.classList.toggle('text-indigo-600');
+            
+            // Toggle info box
+            infoBox.classList.toggle('bg-gray-700');
+            infoBox.classList.toggle('border-gray-600');
+            infoBox.classList.toggle('bg-gray-100');
+            infoBox.classList.toggle('border-gray-300');
+
+            // Toggle paragraph text
+            document.querySelectorAll('.text-gray-400').forEach(p => {
+                p.classList.toggle('text-gray-400');
+                p.classList.toggle('text-gray-600');
+            });
+            
+            // Toggle links
+            links.forEach(link => {
+                if (link.classList.contains('text-indigo-400')) {
+                    link.classList.remove('text-indigo-400', 'hover:text-indigo-300');
+                    link.classList.add('text-indigo-600', 'hover:text-indigo-700');
+                } else if (link.classList.contains('text-indigo-600')) {
+                    link.classList.remove('text-indigo-600', 'hover:text-indigo-700');
+                    link.classList.add('text-indigo-400', 'hover:text-indigo-300');
+                }
+            });
+            
+            // Toggle theme button icon
+            const svg = themeToggle.querySelector('svg');
+            if (svg.innerHTML.includes('sun')) {
+                themeToggle.classList.remove('bg-white', 'hover:bg-gray-100');
+                themeToggle.classList.add('bg-gray-700', 'hover:bg-gray-600');
+                svg.innerHTML = `<path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 10a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 10a1 1 0 01-1 1H2a1 1 0 110-2h1a1 1 0 011 1z" clip-rule="evenodd" />`;
+            } else {
+                themeToggle.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+                themeToggle.classList.add('bg-white', 'hover:bg-gray-100');
+                svg.innerHTML = `<path fill-rule="evenodd" d="M10 2a8 8 0 100 16 8 8 0 000-16zm0 14a6 6 0 110-12 6 6 0 010 12z" clip-rule="evenodd" />
+                                <path fill-rule="evenodd" d="M10 4a1 1 0 100 8 4 4 0 104-4 1 1 0 00-4-4z" clip-rule="evenodd" />`;
+            }
+        });
+    </script>
 </body>
 </html>
