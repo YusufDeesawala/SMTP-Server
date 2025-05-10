@@ -8,7 +8,7 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from dotenv import load_dotenv
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -16,7 +16,6 @@ import base64
 import logging
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
-import json
 
 # Load environment variables
 load_dotenv()
@@ -65,19 +64,6 @@ init_db()
 
 # OAuth 2.0 configuration
 SCOPES = ['https://www.googleapis.com/auth/gmail.send']
-CLIENT_SECRETS = {
-    "web": {
-        "client_id": os.getenv('GOOGLE_CLIENT_ID'),
-        "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
-        "redirect_uris": [url_for('oauth2callback', _external=True, _scheme='https')],
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token"
-    }
-}
-# Write credentials to a temporary file
-with open('credentials.json', 'w') as f:
-    json.dump(CLIENT_SECRETS, f)
-REDIRECT_URI = url_for('oauth2callback', _external=True, _scheme='https')
 
 def get_gmail_service():
     creds = None
@@ -200,12 +186,10 @@ def register():
         if conn:
             try:
                 with conn.cursor() as cur:
-                    # Check if email exists
                     cur.execute("SELECT id FROM users WHERE email = %s", (email,))
                     if cur.fetchone():
                         flash('Email already registered.', 'error')
                         return redirect(url_for('register'))
-                    # Insert new user
                     cur.execute("INSERT INTO users (email) VALUES (%s) RETURNING id", (email,))
                     user_id = cur.fetchone()[0]
                     conn.commit()
@@ -229,8 +213,18 @@ def authorize():
         return redirect(url_for('login'))
     
     try:
-        flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-        flow.redirect_uri = REDIRECT_URI
+        redirect_uri = url_for('oauth2callback', _external=True, _scheme='https')
+        client_config = {
+            "web": {
+                "client_id": os.getenv('GOOGLE_CLIENT_ID'),
+                "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
+                "redirect_uris": [redirect_uri],
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token"
+            }
+        }
+        flow = Flow.from_client_config(client_config, SCOPES)
+        flow.redirect_uri = redirect_uri
         authorization_url, state = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
@@ -269,8 +263,18 @@ def oauth2callback():
         return redirect(url_for('login'))
     
     try:
-        flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-        flow.redirect_uri = REDIRECT_URI
+        redirect_uri = url_for('oauth2callback', _external=True, _scheme='https')
+        client_config = {
+            "web": {
+                "client_id": os.getenv('GOOGLE_CLIENT_ID'),
+                "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
+                "redirect_uris": [redirect_uri],
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token"
+            }
+        }
+        flow = Flow.from_client_config(client_config, SCOPES)
+        flow.redirect_uri = redirect_uri
         logger.debug(f"Fetching token with response URL: {request.url}")
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
