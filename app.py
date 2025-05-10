@@ -1,7 +1,8 @@
 from flask import Flask, request, render_template, flash, redirect, url_for, session
-from flask_sqlalchemy import SQLAlchemy
 import os
 import re
+import psycopg2
+from psycopg2 import sql
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -15,12 +16,13 @@ import base64
 import logging
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
+import json
 
-# Allow HTTP for localhost during OAuth (for local testing only)
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+# Load environment variables
+load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize Flask app
@@ -29,26 +31,53 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')
 app.config['SESSION_PERMANENT'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = False  # False for local HTTP testing
+app.config['SESSION_COOKIE_SECURE'] = True  # True for HTTPS in production
 
-# SQLAlchemy configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URI', 'sqlite:///email_app.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
+# Database connection
+def get_db_connection():
+    try:
+        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        return conn
+    except Exception as e:
+        logger.error(f"Database connection error: {e}")
+        return None
 
-# User model
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(120), unique=True, nullable=False)
+# Create users table if not exists
+def init_db():
+    conn = get_db_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        id SERIAL PRIMARY KEY,
+                        email VARCHAR(120) UNIQUE NOT NULL
+                    );
+                """)
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error initializing database: {e}")
+        finally:
+            conn.close()
 
-# Create database tables
-with app.app_context():
-    db.create_all()
+# Initialize database
+init_db()
 
 # OAuth 2.0 configuration
 SCOPES = ['https://www.googleapis.com/auth/gmail.send']
-CLIENT_SECRETS_FILE = 'credentials.json'
-REDIRECT_URI = os.getenv('REDIRECT_URI', 'http://localhost:5000/oauth2callback')  # Configurable for HTTPS
+CLIENT_SECRETS = {
+    "web": {
+        "client_id": os.getenv('GOOGLE_CLIENT_ID'),
+        "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
+        "redirect_uris": [url_for('oauth2callback', _external=True, _scheme='https')],
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token"
+    }
+}
+# Write credentials to a temporary file
+with open('credentials.json', 'w') as f:
+    json.dump(CLIENT_SECRETS, f)
+REDIRECT_URI = url_for('oauth2callback', _external=True, _scheme='https')
 
 def get_gmail_service():
     creds = None
@@ -130,17 +159,29 @@ def login():
             flash('Invalid email format.', 'error')
             return redirect(url_for('login'))
         
-        user = User.query.filter_by(email=email).first()
-        if user:
-            session['user_id'] = user.id
-            session['user_email'] = user.email
-            session.permanent = True
-            session.modified = True
-            logger.debug(f"User logged in: {email}, Session: {session}")
-            flash('Logged in successfully! Please authorize Gmail access.', 'success')
-            return redirect(url_for('authorize'))
+        conn = get_db_connection()
+        if conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id, email FROM users WHERE email = %s", (email,))
+                    user = cur.fetchone()
+                if user:
+                    session['user_id'] = user[0]
+                    session['user_email'] = user[1]
+                    session.permanent = True
+                    session.modified = True
+                    logger.debug(f"User logged in: {email}, Session: {session}")
+                    flash('Logged in successfully! Please authorize Gmail access.', 'success')
+                    return redirect(url_for('authorize'))
+                else:
+                    flash('Email not registered. Please register.', 'error')
+            except Exception as e:
+                logger.error(f"Login error: {e}")
+                flash('Database error during login.', 'error')
+            finally:
+                conn.close()
         else:
-            flash('Email not registered. Please register.', 'error')
+            flash('Database connection failed.', 'error')
     
     return render_template('login.html')
 
@@ -155,16 +196,29 @@ def register():
             flash('Invalid email format.', 'error')
             return redirect(url_for('register'))
         
-        if User.query.filter_by(email=email).first():
-            flash('Email already registered.', 'error')
-            return redirect(url_for('register'))
-        
-        new_user = User(email=email)
-        db.session.add(new_user)
-        db.session.commit()
-        logger.debug(f"User registered: {email}")
-        flash('Registration successful! Please log in.', 'success')
-        return redirect(url_for('login'))
+        conn = get_db_connection()
+        if conn:
+            try:
+                with conn.cursor() as cur:
+                    # Check if email exists
+                    cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+                    if cur.fetchone():
+                        flash('Email already registered.', 'error')
+                        return redirect(url_for('register'))
+                    # Insert new user
+                    cur.execute("INSERT INTO users (email) VALUES (%s) RETURNING id", (email,))
+                    user_id = cur.fetchone()[0]
+                    conn.commit()
+                logger.debug(f"User registered: {email}")
+                flash('Registration successful! Please log in.', 'success')
+                return redirect(url_for('login'))
+            except Exception as e:
+                logger.error(f"Registration error: {e}")
+                flash('Database error during registration.', 'error')
+            finally:
+                conn.close()
+        else:
+            flash('Database connection failed.', 'error')
     
     return render_template('register.html')
 
@@ -175,7 +229,7 @@ def authorize():
         return redirect(url_for('login'))
     
     try:
-        flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
+        flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
         flow.redirect_uri = REDIRECT_URI
         authorization_url, state = flow.authorization_url(
             access_type='offline',
@@ -198,7 +252,6 @@ def oauth2callback():
         flash('Session expired. Please log in again.', 'error')
         return redirect(url_for('login'))
     
-    # Check for error in Google's response
     parsed_url = urlparse(request.url)
     query_params = parse_qs(parsed_url.query)
     if 'error' in query_params:
@@ -216,7 +269,7 @@ def oauth2callback():
         return redirect(url_for('login'))
     
     try:
-        flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
+        flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
         flow.redirect_uri = REDIRECT_URI
         logger.debug(f"Fetching token with response URL: {request.url}")
         flow.fetch_token(authorization_response=request.url)
@@ -224,12 +277,12 @@ def oauth2callback():
         session['token'] = credentials.to_json()
         session.modified = True
         logger.debug("OAuth token fetched and stored in session")
-        session.pop('state', None)  # Clear state after use
+        session.pop('state', None)
         flash('Gmail access authorized!', 'success')
         return redirect(url_for('index'))
     except Exception as e:
         logger.error(f"OAuth callback error: {str(e)}")
-        flash(f"Authorization failed: {str(e)}. Please check your Google Cloud Console settings and try again.", 'error')
+        flash(f"Authorization failed: {str(e)}. Please check your Google Cloud Console settings.", 'error')
         return redirect(url_for('login'))
 
 @app.route('/logout')
@@ -252,11 +305,26 @@ def index():
         logger.debug("No user_id in session, redirecting to login")
         return redirect(url_for('login'))
     
-    user = User.query.get(session['user_id'])
-    if not user:
-        session.clear()
-        logger.debug("User not found, session cleared")
-        flash('User not found. Please log in again.', 'error')
+    conn = get_db_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT email FROM users WHERE id = %s", (session['user_id'],))
+                user = cur.fetchone()
+            if not user:
+                session.clear()
+                logger.debug("User not found, session cleared")
+                flash('User not found. Please log in again.', 'error')
+                return redirect(url_for('login'))
+            user_email = user[0]
+        except Exception as e:
+            logger.error(f"Error fetching user: {e}")
+            flash('Database error.', 'error')
+            return redirect(url_for('login'))
+        finally:
+            conn.close()
+    else:
+        flash('Database connection failed.', 'error')
         return redirect(url_for('login'))
     
     if request.method == 'POST':
@@ -278,7 +346,7 @@ def index():
             if not service:
                 logger.debug("No Gmail service, redirecting to authorize")
                 return redirect(url_for('authorize'))
-            msg = create_email(user.email, recipient_email, reply_to, subject, message, files)
+            msg = create_email(user_email, recipient_email, reply_to, subject, message, files)
             if send_email(service, msg):
                 flash('Email sent successfully!', 'success')
             else:
@@ -289,7 +357,7 @@ def index():
         
         return redirect(url_for('index'))
     
-    return render_template('index.html', user_email=user.email)
+    return render_template('index.html', user_email=user_email)
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run()

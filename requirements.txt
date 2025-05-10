@@ -1,10 +1,7 @@
-secure-smtplib
-email-to
-flask
-flask_sqlalchemy
-bcrypt
-python-dotenv
-cryptography
-google-auth-oauthlib
-google-auth-httplib2
-google-api-python-client
+flask==2.3.3
+psycopg2-binary==2.9.9
+python-dotenv==1.0.0
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+google-api-python-client==2.111.0
+gunicorn==21.2.0
