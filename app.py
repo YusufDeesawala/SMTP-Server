@@ -12,6 +12,11 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 import base64
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -44,7 +49,7 @@ def get_gmail_service():
         try:
             creds = Credentials.from_authorized_user_info(eval(session['token']), SCOPES)
         except Exception as e:
-            app.logger.error(f"Error loading credentials: {e}")
+            logger.error(f"Error loading credentials: {e}")
             session.pop('token', None)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
@@ -52,7 +57,7 @@ def get_gmail_service():
                 creds.refresh(Request())
                 session['token'] = creds.to_json()
             except Exception as e:
-                app.logger.error(f"Error refreshing token: {e}")
+                logger.error(f"Error refreshing token: {e}")
                 session.pop('token', None)
                 return None
         else:
@@ -150,9 +155,11 @@ def authorize():
             include_granted_scopes='true'
         )
         session['state'] = state
+        logger.debug(f"Authorization URL: {authorization_url}, State: {state}")
         return redirect(authorization_url)
     except Exception as e:
-        flash(f"Error initiating OAuth flow: {str(e)}", 'error')
+        logger.error(f"Error initiating OAuth flow: {e}")
+        flash(f"Error initiating Gmail authorization: {str(e)}", 'error')
         return redirect(url_for('login'))
 
 @app.route('/oauth2callback')
@@ -162,6 +169,7 @@ def oauth2callback():
     
     state = session.get('state')
     if not state:
+        logger.error("Invalid OAuth state")
         flash('Invalid OAuth state. Please try again.', 'error')
         return redirect(url_for('authorize'))
     
@@ -170,10 +178,12 @@ def oauth2callback():
         flow.redirect_uri = REDIRECT_URI
         flow.fetch_token(authorization_response=request.url)
         session['token'] = flow.credentials.to_json()
+        logger.debug("OAuth token fetched successfully")
         flash('Gmail access authorized!', 'success')
         return redirect(url_for('index'))
     except Exception as e:
-        flash(f"OAuth error: {str(e)}", 'error')
+        logger.error(f"OAuth callback error: {e}")
+        flash(f"Authorization failed: {str(e)}. Please ensure your Google account allows access and try again.", 'error')
         return redirect(url_for('authorize'))
 
 @app.route('/logout')
@@ -183,6 +193,12 @@ def logout():
     session.pop('token', None)
     session.pop('state', None)
     flash('Logged out successfully.', 'success')
+    return redirect(url_for('login'))
+
+@app.route('/clear_session')
+def clear_session():
+    session.clear()
+    flash('Session cleared.', 'success')
     return redirect(url_for('login'))
 
 @app.route('/', methods=['GET', 'POST'])
@@ -222,6 +238,7 @@ def index():
             else:
                 flash('Invalid recipient email.', 'error')
         except Exception as e:
+            logger.error(f"Email sending error: {e}")
             flash(f"An error occurred: {str(e)}", 'error')
         
         return redirect(url_for('index'))
