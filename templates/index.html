@@ -128,11 +128,12 @@
         
         .meteor-trail {
             position: absolute;
-            width: 2px;
-            height: 20px;
-            background: linear-gradient(to bottom, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0));
+            width: 3px;
+            height: 30px;
+            background: linear-gradient(to bottom, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0));
             transform-origin: top;
             pointer-events: none;
+            filter: blur(2px);
         }
         
         .send-button:hover .send-pulse {
@@ -187,29 +188,34 @@
             align-items: center;
             z-index: 1000;
             pointer-events: none;
-            background: rgba(5, 5, 5, 0.7);
+            background: rgba(5, 5, 5, 0.8);
             opacity: 0;
         }
         
         .checkmark {
-            width: 120px;
-            height: 120px;
+            width: 100px;
+            height: 100px;
+            filter: drop-shadow(0 0 10px rgba(34, 197, 94, 0.5));
         }
         
         .checkmark-circle {
             stroke-dasharray: 166;
             stroke-dashoffset: 166;
-            stroke-width: 4;
+            stroke-width: 5;
             stroke: #22c55e;
             fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
         }
         
         .checkmark-tick {
-            stroke-dasharray: 48;
-            stroke-dashoffset: 48;
-            stroke-width: 4;
+            stroke-dasharray: 50;
+            stroke-dashoffset: 50;
+            stroke-width: 5;
             stroke: #22c55e;
             fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
         }
     </style>
 </head>
@@ -366,9 +372,9 @@
     </div>
 
     <div id="checkmarkContainer" class="checkmark-container">
-        <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
-            <circle class="checkmark-circle" cx="26" cy="26" r="25"/>
-            <path class="checkmark-tick" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
+        <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60">
+            <circle class="checkmark-circle" cx="30" cy="30" r="28"/>
+            <path class="checkmark-tick" d="M18 32.5c2-2 5-4 8-4s6 2 8 4c2 2 4 4 4 6s-2 4-4 4-6-2-8-4-4-4-6-4-4-2-4-4 2-4 2-4z"/>
         </svg>
     </div>
 
@@ -516,10 +522,10 @@
             // Create particle burst
             const buttonRect = sendButton.getBoundingClientRect();
             const centerX = buttonRect.width / 2;
-            const centerY = buttonRect.height / 2;
+            const centerY = buttonRect.height - 10;
             
             for (let i = 0; i < 20; i++) {
-                createParticle(centerX, buttonRect.height - 10, sendButton);
+                createParticle(centerX, centerY, sendButton);
             }
             
             // Trigger meteor shower
@@ -535,7 +541,7 @@
                 const card = document.querySelector('.hovering-card');
                 card.style.opacity = '1';
                 card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg)';
-            }, 4000);
+            }, 3000);
         });
         
         function createParticle(x, y, parent) {
@@ -607,30 +613,30 @@
                     top: `${startY}%`,
                     left: `${startX}%`,
                     opacity: 1,
-                    scale: Math.random() * 0.5 + 0.8,
-                    boxShadow: `0 0 10px rgba(255, 255, 255, 0.8)`
+                    scale: Math.random() * 0.5 + 1,
+                    boxShadow: `0 0 12px rgba(255, 255, 255, 1)`
                 });
                 
                 // Position trail behind the dot
                 gsap.set(trail, {
                     top: `${startY}%`,
                     left: `${startX}%`,
-                    opacity: 0.8,
-                    scaleY: Math.random() * 1 + 0.5
+                    opacity: 0.9,
+                    scaleY: Math.random() * 0.8 + 0.8
                 });
                 
                 // Calculate end position (diagonal trajectory)
-                const endX = startX + (Math.random() * 40 + 20);
-                const endY = 100 + Math.random() * 20;
+                const endX = startX + (Math.random() * 50 + 30);
+                const endY = 100 + Math.random() * 30;
                 
                 // Animate dot
                 gsap.to(dot, {
                     top: `${endY}%`,
                     left: `${endX}%`,
                     opacity: 0,
-                    scale: 0.3,
-                    duration: Math.random() * 0.8 + 0.6,
-                    ease: "power2.out",
+                    scale: 0.4,
+                    duration: 1.5 + Math.random() * 0.5,
+                    ease: "power3.out",
                     onUpdate: () => {
                         // Update trail position to follow dot
                         const dotRect = dot.getBoundingClientRect();
@@ -657,9 +663,9 @@
                 gsap.to(trail, {
                     opacity: 0,
                     scaleY: 0,
-                    duration: Math.random() * 0.8 + 0.6,
-                    ease: "power2.out",
-                    delay: 0.1
+                    duration: 1.5 + Math.random() * 0.5,
+                    ease: "power3.out",
+                    delay: 0.05
                 });
             });
         }
@@ -670,53 +676,62 @@
             const checkmarkTick = checkmarkContainer.querySelector('.checkmark-tick');
             const card = document.querySelector('.hovering-card');
             
+            // Create and play sound effect
+            const audio = new Audio('audios/checkmark.mp3');
+            audio.volume = 0.5;
+            audio.play().catch(error => {
+                console.warn('Audio playback failed:', error);
+            });
+            
             // Fade out card and fade in checkmark container
             gsap.to(card, {
                 opacity: 0,
-                duration: 0.5,
+                duration: 0.3,
                 ease: "power3.out"
             });
             
             gsap.to(checkmarkContainer, {
                 opacity: 1,
-                duration: 0.5,
+                duration: 0.3,
                 ease: "power3.out"
             });
             
             // Animate circle drawing
             gsap.to(checkmarkCircle, {
                 strokeDashoffset: 0,
-                duration: 0.8,
+                duration: 0.4,
+                ease: "power2.inOut"
+            });
+            
+            // Animate tick drawing
+            gsap.to(checkmarkTick, {
+                strokeDashoffset: 0,
+                duration: 0.4,
                 ease: "power2.inOut",
+                delay: 0.2,
                 onComplete: () => {
-                    // Animate tick drawing
-                    gsap.to(checkmarkTick, {
-                        strokeDashoffset: 0,
-                        duration: 0.6,
-                        ease: "power2.inOut",
+                    // Scale and glow
+                    gsap.to(checkmarkContainer.querySelector('.checkmark'), {
+                        scale: 1.2,
+                        duration: 0.2,
+                        ease: "back.out(1.7)",
                         onComplete: () => {
-                            // Scale up and glow
-                            gsap.to(checkmarkContainer.querySelector('.checkmark'), {
-                                scale: 1.3,
-                                duration: 0.5,
-                                ease: "elastic.out(1, 0.5)",
+                            // Fade out checkmark and fade card back in
+                            gsap.to(checkmarkContainer, {
+                                opacity: 0,
+                                duration: 0.3,
+                                ease: "power3.in",
                                 onComplete: () => {
-                                    // Fade out checkmark and fade card back in
-                                    gsap.to(checkmarkContainer, {
-                                        opacity: 0,
-                                        duration: 0.5,
-                                        delay: 0.5,
-                                        ease: "power3.in",
-                                        onComplete: () => {
-                                            gsap.set(checkmarkCircle, { strokeDashoffset: 166 });
-                                            gsap.set(checkmarkTick, { strokeDashoffset: 48 });
-                                            gsap.to(card, {
-                                                opacity: 1,
-                                                duration: 0.5,
-                                                ease: "power3.out"
-                                            });
-                                        }
+                                    gsap.set(checkmarkCircle, { strokeDashoffset: 166 });
+                                    gsap.set(checkmarkTick, { strokeDashoffset: 50 });
+                                    gsap.to(card, {
+                                        opacity: 1,
+                                        duration: 0.3,
+                                        ease: "power3.out"
                                     });
+                                    // Clean up audio
+                                    audio.pause();
+                                    audio.currentTime = 0;
                                 }
                             });
                         }
