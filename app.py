@@ -3,9 +3,12 @@ import os
 import re
 import psycopg2
 from psycopg2 import sql
+import mimetypes
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
+from email.mime.audio import MIMEAudio
+from email.mime.image import MIMEImage
 from email import encoders
 from dotenv import load_dotenv
 from google_auth_oauthlib.flow import Flow
@@ -16,6 +19,7 @@ import base64
 import logging
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
+from email.mime.application import MIMEApplication
 
 # Load environment variables
 load_dotenv()
@@ -30,7 +34,7 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')
 app.config['SESSION_PERMANENT'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = True  # True for HTTPS in production
+app.config['SESSION_COOKIE_SECURE'] = True  
 
 # Database connection
 def get_db_connection():
@@ -108,18 +112,67 @@ def create_email(sender_email, recipient_email, reply_to, subject, message, file
         msg['Reply-To'] = reply_to
     msg['Subject'] = subject
     msg.attach(MIMEText(message, 'plain'))
-    
+
+    # Track total size to warn about Gmail's 35 MB limit
+    total_size = 0
+    max_size = 35 * 1024 * 1024  # 35 MB in bytes
+
     for file in files:
         if file and file.filename:
-            filename = file.filename
-            attachment = MIMEBase('application', 'octet-stream')
-            attachment.set_payload(file.read())
-            encoders.encode_base64(attachment)
-            attachment.add_header('Content-Disposition', f'attachment; filename="{filename}"')
-            msg.attach(attachment)
-    
-    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-    return {'raw': raw}
+            try:
+                # Get file content and size
+                file_content = file.read()
+                file_size = len(file_content)
+                total_size += file_size
+
+                # Check if total size exceeds Gmail's limit
+                if total_size > max_size:
+                    logger.warning(f"Total attachment size exceeds 35 MB limit: {total_size} bytes")
+                    raise ValueError(f"Total attachment size exceeds Gmail's 35 MB limit.")
+
+                # Guess MIME type
+                mime_type, _ = mimetypes.guess_type(file.filename)
+                if mime_type is None:
+                    mime_type = 'application/octet-stream'
+                main_type, sub_type = mime_type.split('/', 1)
+
+                # Create appropriate MIME part based on main type
+                if main_type == 'text':
+                    part = MIMEText(file_content, _subtype=sub_type, _charset='utf-8')
+                elif main_type == 'image':
+                    part = MIMEImage(file_content, _subtype=sub_type)
+                elif main_type == 'audio':
+                    part = MIMEAudio(file_content, _subtype=sub_type)
+                elif main_type == 'application':
+                    part = MIMEApplication(file_content, _subtype=sub_type)
+                else:
+                    part = MIMEBase(main_type, sub_type)
+                    part.set_payload(file_content)
+                    encoders.encode_base64(part)
+
+                # Add header
+                part.add_header(
+                    'Content-Disposition',
+                    f'attachment; filename="{file.filename}"'
+                )
+
+                # Attach to message
+                msg.attach(part)
+                logger.debug(f"Attached file: {file.filename}, Size: {file_size} bytes")
+            except Exception as e:
+                logger.error(f"Error attaching file {file.filename}: {e}")
+                raise ValueError(f"Failed to attach {file.filename}: {str(e)}")
+            finally:
+                # Reset file pointer to avoid issues with FileStorage
+                file.seek(0)
+
+    # Encode the message
+    try:
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        return {'raw': raw}
+    except Exception as e:
+        logger.error(f"Error encoding email message: {e}")
+        raise ValueError(f"Failed to encode email: {str(e)}")
 
 def send_email(service, msg):
     try:
@@ -355,6 +408,9 @@ def index():
                 flash('Email sent successfully!', 'success')
             else:
                 flash('Invalid recipient email.', 'error')
+        except ValueError as ve:
+            logger.error(f"ValueError in email sending: {ve}")
+            flash(str(ve), 'error')  # Display specific error (e.g., size limit or file error)
         except Exception as e:
             logger.error(f"Email sending error: {e}")
             flash(f"An error occurred: {str(e)}", 'error')
