@@ -106,14 +106,16 @@ def get_gmail_service():
         logger.debug("No token in session")
         return None
     try:
+        # Parse the JSON string stored in session['token']
         token_data = json.loads(session['token'])
+        # token_data is already a dictionary from credentials.to_json()
         creds = Credentials.from_authorized_user_info(token_data, SCOPES)
         logger.debug("Loaded credentials from session")
         if not creds.valid:
             if creds.expired and creds.refresh_token:
                 logger.debug("Attempting to refresh OAuth token")
                 creds.refresh(Request())
-                session['token'] = json.dumps(creds.to_json())
+                session['token'] = creds.to_json()
                 session.modified = True
                 logger.debug("Refreshed OAuth token successfully")
             else:
@@ -478,7 +480,7 @@ def oauth2callback():
         logger.debug(f"Fetching token with response URL: {request.url}")
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
-        session['token'] = json.dumps(credentials.to_json())
+        session['token'] = credentials.to_json()  # Store JSON string directly
         session.modified = True
         logger.debug("OAuth token fetched and stored in session")
         session.pop('state', None)
@@ -517,7 +519,7 @@ def backend_service():
 
     access_token = auth_header.split(' ')[1]
     if not access_token:
-        logger.error("No access token provided HALLU")
+        logger.error("No access token provided")
         return jsonify({"error": "No access token provided"}), 401
 
     try:
