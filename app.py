@@ -20,6 +20,7 @@ import base64
 import logging
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
+from flask_cors import CORS
 
 # Load environment variables
 load_dotenv()
@@ -34,7 +35,15 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')
 app.config['SESSION_PERMANENT'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = True  
+app.config['SESSION_COOKIE_SECURE'] = True 
+CORS(app, resources={
+    r"/backend_service": {
+        "origins": ["https://meet-sync-backend-1.vercel.app", "http://localhost:8080"],
+        "allow_headers": ["Authorization", "Content-Type"],
+        "methods": ["POST", "OPTIONS"],
+        "supports_credentials": True
+    }
+}) 
 
 # Database connection
 def get_db_connection():
