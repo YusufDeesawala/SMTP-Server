@@ -37,7 +37,8 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')
 app.config['SESSION_PERMANENT'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = True  # Set to False for local testing without HTTPS
+# Set to False for local testing; True for production (HTTPS)
+app.config['SESSION_COOKIE_SECURE'] = False  # Change to True on Vercel
 CORS(app, resources={
     r"/backend_service": {
         "origins": ["https://meet-sync-backend-1.vercel.app", "http://localhost:8080"],
@@ -103,7 +104,7 @@ def get_gmail_service():
         logger.debug("No token in session")
         return None
     try:
-        creds = Credentials.from_authorized_user_info(eval(session['token']), SCOPES)
+        creds = Credentials.from_authorized_user_info(session['token'], SCOPES)
         logger.debug("Loaded credentials from session")
         if not creds.valid:
             if creds.expired and creds.refresh_token:
@@ -208,8 +209,18 @@ def is_valid_email(email):
     pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
     return re.match(pattern, email) is not None
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/')
+def root():
+    logger.debug("Accessed root route")
+    if 'user_id' in session and 'token' in session:
+        logger.debug("User authenticated, redirecting to index")
+        return redirect(url_for('index'))
+    logger.debug("No user_id or token, redirecting to login")
+    return redirect(url_for('login'))
+
+@app.route('/index', methods=['GET', 'POST'])
 def index():
+    logger.debug("Accessed index route")
     if 'user_id' not in session:
         logger.debug("No user_id in session, redirecting to login")
         return redirect(url_for('login'))
@@ -222,6 +233,7 @@ def index():
     if not conn:
         logger.error("Database connection failed")
         flash('Database connection failed.', 'error')
+        session.clear()
         return redirect(url_for('login'))
     
     try:
@@ -237,6 +249,7 @@ def index():
     except Exception as e:
         logger.error(f"Error fetching user: {e}")
         flash('Database error.', 'error')
+        session.clear()
         return redirect(url_for('login'))
     finally:
         conn.close()
@@ -244,6 +257,8 @@ def index():
     service = get_gmail_service()
     if not service:
         logger.debug("Failed to get Gmail service, redirecting to authorize")
+        session.pop('token', None)
+        session.modified = True
         return redirect(url_for('authorize'))
     
     try:
@@ -257,6 +272,8 @@ def index():
     except HttpError as e:
         logger.error(f"Error fetching user profile: {e}")
         flash('Failed to verify email with Google.', 'error')
+        session.pop('token', None)
+        session.modified = True
         return redirect(url_for('authorize'))
     
     if request.method == 'POST':
@@ -292,8 +309,10 @@ def index():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    logger.debug("Accessed login route")
     # Clear token to prevent scope mismatches
     session.pop('token', None)
+    session.pop('state', None)
     session.modified = True
     
     if 'user_id' in session and 'token' in session:
@@ -303,11 +322,13 @@ def login():
     if request.method == 'POST':
         email = request.form.get('email', '').strip()
         if not is_valid_email(email):
+            logger.debug("Invalid email format")
             flash('Invalid email format.', 'error')
             return render_template('login.html')
         
         conn = get_db_connection()
         if not conn:
+            logger.error("Database connection failed")
             flash('Database connection failed.', 'error')
             return render_template('login.html')
         
@@ -324,6 +345,7 @@ def login():
                 flash('Logged in successfully! Please authorize Gmail access.', 'success')
                 return redirect(url_for('authorize'))
             else:
+                logger.debug(f"Email not registered: {email}")
                 flash('Email not registered. Please register.', 'error')
         except Exception as e:
             logger.error(f"Login error: {e}")
@@ -336,6 +358,7 @@ def login():
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    logger.debug("Accessed register route")
     if 'user_id' in session and 'token' in session:
         logger.debug("User already authenticated, redirecting to index")
         return redirect(url_for('index'))
@@ -343,11 +366,13 @@ def register():
     if request.method == 'POST':
         email = request.form.get('email', '').strip()
         if not is_valid_email(email):
+            logger.debug("Invalid email format")
             flash('Invalid email format.', 'error')
             return render_template('register.html')
         
         conn = get_db_connection()
         if not conn:
+            logger.error("Database connection failed")
             flash('Database connection failed.', 'error')
             return render_template('register.html')
         
@@ -355,6 +380,7 @@ def register():
             with conn.cursor() as cur:
                 cur.execute("SELECT id FROM users WHERE email = %s", (email,))
                 if cur.fetchone():
+                    logger.debug(f"Email already registered: {email}")
                     flash('Email already registered.', 'error')
                     return render_template('register.html')
                 cur.execute("INSERT INTO users (email) VALUES (%s) RETURNING id", (email,))
@@ -374,6 +400,7 @@ def register():
 
 @app.route('/authorize')
 def authorize():
+    logger.debug("Accessed authorize route")
     if 'user_id' not in session:
         logger.debug("No user_id in session, redirecting to login")
         return redirect(url_for('login'))
@@ -407,6 +434,7 @@ def authorize():
 
 @app.route('/oauth2callback')
 def oauth2callback():
+    logger.debug("Accessed oauth2callback route")
     if 'user_id' not in session:
         logger.debug("No user_id in session at callback, redirecting to login")
         flash('Session expired. Please log in again.', 'error')
@@ -453,10 +481,12 @@ def oauth2callback():
     except Exception as e:
         logger.error(f"OAuth callback error: {str(e)}")
         flash(f"Authorization failed: {str(e)}. Please try again.", 'error')
+        session.clear()
         return redirect(url_for('login'))
 
 @app.route('/logout')
 def logout():
+    logger.debug("Accessed logout route")
     session.clear()
     logger.debug("User logged out, session cleared")
     flash('Logged out successfully.', 'success')
@@ -464,6 +494,7 @@ def logout():
 
 @app.route('/clear_session')
 def clear_session():
+    logger.debug("Accessed clear_session route")
     session.clear()
     logger.debug("Session cleared via /clear_session")
     flash('Session cleared.', 'success')
