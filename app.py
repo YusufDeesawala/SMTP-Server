@@ -28,7 +28,7 @@ from googleapiclient.errors import HttpError
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)  # Set to DEBUG for detailed logs
 logger = logging.getLogger(__name__)
 
 # Initialize Flask app
@@ -37,7 +37,7 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')
 app.config['SESSION_PERMANENT'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_SECURE'] = True  # Ensure HTTPS in production
 CORS(app, resources={
     r"/backend_service": {
         "origins": ["https://meet-sync-backend-1.vercel.app", "http://localhost:8080"],
@@ -78,7 +78,11 @@ def init_db():
 init_db()
 
 # OAuth 2.0 configuration
-SCOPES = ['https://www.googleapis.com/auth/gmail.send']
+SCOPES = [
+    'https://www.googleapis.com/auth/gmail.send',
+    'openid',
+    'https://www.googleapis.com/auth/userinfo.email'
+]
 
 def get_user_email_from_token(access_token):
     try:
@@ -102,7 +106,8 @@ def get_gmail_service():
             logger.debug("Loaded credentials from session")
         except Exception as e:
             logger.error(f"Error loading credentials: {e}")
-            session.pop('token', None)  # Clear invalid token
+            session.pop('token', None)
+            session.modified = True
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             try:
@@ -114,25 +119,27 @@ def get_gmail_service():
             except Exception as e:
                 logger.error(f"Error refreshing token: {e}")
                 session.pop('token', None)
-                flash(f"Token refresh failed: {str(e)}. Please reauthorize.", 'error')
-                return None
+                session.modified = True
+                logger.debug("Redirecting to login due to token refresh failure")
+                return None  # Return None to trigger login
         else:
-            logger.debug("No valid credentials, redirecting to authorize")
-            flash('Please authorize Gmail access.', 'error')
+            logger.debug("No valid credentials, need to authorize")
             return None
     try:
-        # Verify scopes match
         if set(creds.scopes) != set(SCOPES):
             logger.warning(f"Scope mismatch. Token scopes: {creds.scopes}, Required: {SCOPES}")
             session.pop('token', None)
-            flash('Authorization scopes have changed. Please reauthorize.', 'error')
+            session.modified = True
+            logger.debug("Redirecting to login due to scope mismatch")
             return None
         service = build('gmail', 'v1', credentials=creds)
         logger.debug("Gmail service initialized successfully")
         return service
     except Exception as e:
         logger.error(f"Error building Gmail service: {e}")
-        flash(f"Failed to initialize Gmail service: {str(e)}", 'error')
+        session.pop('token', None)
+        session.modified = True
+        logger.debug("Redirecting to login due to service build failure")
         return None
 
 def get_gmail_service_with_token(access_token):
@@ -214,14 +221,21 @@ def is_valid_email(email):
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    # Clear token if present to avoid scope issues
+    if 'token' in session:
+        logger.debug("Clearing existing token on login")
+        session.pop('token', None)
+        session.modified = True
+
     if 'user_id' in session:
+        logger.debug("User already logged in, redirecting to index")
         return redirect(url_for('index'))
     
     if request.method == 'POST':
         email = request.form.get('email').strip()
         if not is_valid_email(email):
             flash('Invalid email format.', 'error')
-            return redirect(url_for('login'))
+            return render_template('login.html')
         
         conn = get_db_connection()
         if conn:
@@ -252,13 +266,14 @@ def login():
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if 'user_id' in session:
+        logger.debug("User already logged in, redirecting to index")
         return redirect(url_for('index'))
     
     if request.method == 'POST':
         email = request.form.get('email').strip()
         if not is_valid_email(email):
             flash('Invalid email format.', 'error')
-            return redirect(url_for('register'))
+            return render_template('register.html')
         
         conn = get_db_connection()
         if conn:
@@ -267,7 +282,7 @@ def register():
                     cur.execute("SELECT id FROM users WHERE email = %s", (email,))
                     if cur.fetchone():
                         flash('Email already registered.', 'error')
-                        return redirect(url_for('register'))
+                        return render_template('register.html')
                     cur.execute("INSERT INTO users (email) VALUES (%s) RETURNING id", (email,))
                     user_id = cur.fetchone()[0]
                     conn.commit()
@@ -305,7 +320,7 @@ def authorize():
         flow.redirect_uri = redirect_uri
         authorization_url, state = flow.authorization_url(
             access_type='offline',
-            include_granted_scopes='false',  # Disable scope expansion
+            include_granted_scopes='true',
             prompt='consent'
         )
         session['state'] = state
@@ -364,7 +379,7 @@ def oauth2callback():
         return redirect(url_for('index'))
     except Exception as e:
         logger.error(f"OAuth callback error: {str(e)}")
-        flash(f"Authorization failed: {str(e)}. Please check your Google Cloud Console settings.", 'error')
+        flash(f"Authorization failed: {str(e)}. Please try again.", 'error')
         return redirect(url_for('login'))
 
 @app.route('/logout')
@@ -409,7 +424,6 @@ def index():
         flash('Database connection failed.', 'error')
         return redirect(url_for('login'))
     
-    # Verify email with Google
     service = get_gmail_service()
     if not service:
         logger.debug("No Gmail service, redirecting to authorize")
@@ -421,7 +435,8 @@ def index():
         if google_email != db_user_email:
             logger.warning(f"Email mismatch. Google: {google_email}, DB: {db_user_email}")
             flash('Authenticated email does not match registered email.', 'error')
-            return redirect(url_for('logout'))
+            session.clear()
+            return redirect(url_for('login'))
     except HttpError as e:
         logger.error(f"Error fetching user profile: {e}")
         flash('Failed to verify email with Google.', 'error')
@@ -436,10 +451,10 @@ def index():
         
         if not is_valid_email(recipient_email):
             flash('Invalid recipient email address.', 'error')
-            return redirect(url_for('index'))
+            return render_template('index.html', user_email=google_email)
         if reply_to and not is_valid_email(reply_to):
             flash('Invalid reply-to email address.', 'error')
-            return redirect(url_for('index'))
+            return render_template('index.html', user_email=google_email)
         
         try:
             msg = create_email(google_email, recipient_email, reply_to, subject, message, files)
@@ -550,4 +565,4 @@ def backend_service():
         return jsonify({"error": f"Failed to send email: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    app.run()
+    app.run(debug=True)
