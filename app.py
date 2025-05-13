@@ -22,6 +22,7 @@ from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 from flask_cors import CORS
 import requests
+from googleapiclient.errors import HttpError
 
 # Load environment variables
 load_dotenv()
@@ -101,7 +102,7 @@ def get_gmail_service():
             logger.debug("Loaded credentials from session")
         except Exception as e:
             logger.error(f"Error loading credentials: {e}")
-            session.pop('token', None)
+            session.pop('token', None)  # Clear invalid token
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             try:
@@ -120,6 +121,12 @@ def get_gmail_service():
             flash('Please authorize Gmail access.', 'error')
             return None
     try:
+        # Verify scopes match
+        if set(creds.scopes) != set(SCOPES):
+            logger.warning(f"Scope mismatch. Token scopes: {creds.scopes}, Required: {SCOPES}")
+            session.pop('token', None)
+            flash('Authorization scopes have changed. Please reauthorize.', 'error')
+            return None
         service = build('gmail', 'v1', credentials=creds)
         logger.debug("Gmail service initialized successfully")
         return service
@@ -298,7 +305,7 @@ def authorize():
         flow.redirect_uri = redirect_uri
         authorization_url, state = flow.authorization_url(
             access_type='offline',
-            include_granted_scopes='true',
+            include_granted_scopes='false',  # Disable scope expansion
             prompt='consent'
         )
         session['state'] = state
@@ -391,7 +398,7 @@ def index():
                 logger.debug("User not found, session cleared")
                 flash('User not found. Please log in again.', 'error')
                 return redirect(url_for('login'))
-            user_email = user[0]
+            db_user_email = user[0]
         except Exception as e:
             logger.error(f"Error fetching user: {e}")
             flash('Database error.', 'error')
@@ -401,6 +408,24 @@ def index():
     else:
         flash('Database connection failed.', 'error')
         return redirect(url_for('login'))
+    
+    # Verify email with Google
+    service = get_gmail_service()
+    if not service:
+        logger.debug("No Gmail service, redirecting to authorize")
+        return redirect(url_for('authorize'))
+    
+    try:
+        profile = service.users().getProfile(userId='me').execute()
+        google_email = profile['emailAddress']
+        if google_email != db_user_email:
+            logger.warning(f"Email mismatch. Google: {google_email}, DB: {db_user_email}")
+            flash('Authenticated email does not match registered email.', 'error')
+            return redirect(url_for('logout'))
+    except HttpError as e:
+        logger.error(f"Error fetching user profile: {e}")
+        flash('Failed to verify email with Google.', 'error')
+        return redirect(url_for('authorize'))
     
     if request.method == 'POST':
         recipient_email = request.form.get('recipient_email').strip()
@@ -417,11 +442,7 @@ def index():
             return redirect(url_for('index'))
         
         try:
-            service = get_gmail_service()
-            if not service:
-                logger.debug("No Gmail service, redirecting to authorize")
-                return redirect(url_for('authorize'))
-            msg = create_email(user_email, recipient_email, reply_to, subject, message, files)
+            msg = create_email(google_email, recipient_email, reply_to, subject, message, files)
             if send_email(service, msg):
                 flash('Email sent successfully!', 'success')
             else:
@@ -435,7 +456,7 @@ def index():
         
         return redirect(url_for('index'))
     
-    return render_template('index.html', user_email=user_email)
+    return render_template('index.html', user_email=google_email)
 
 @app.route('/backend_service', methods=['POST'])
 def backend_service():
