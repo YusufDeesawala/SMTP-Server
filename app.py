@@ -28,7 +28,7 @@ from googleapiclient.errors import HttpError
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)  # Set to DEBUG for detailed logs
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Initialize Flask app
@@ -37,7 +37,7 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')
 app.config['SESSION_PERMANENT'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = True  # Ensure HTTPS in production
+app.config['SESSION_COOKIE_SECURE'] = True  # Set to False for local testing without HTTPS
 CORS(app, resources={
     r"/backend_service": {
         "origins": ["https://meet-sync-backend-1.vercel.app", "http://localhost:8080"],
@@ -99,47 +99,36 @@ def get_user_email_from_token(access_token):
         return None
 
 def get_gmail_service():
-    creds = None
-    if 'token' in session:
-        try:
-            creds = Credentials.from_authorized_user_info(eval(session['token']), SCOPES)
-            logger.debug("Loaded credentials from session")
-        except Exception as e:
-            logger.error(f"Error loading credentials: {e}")
-            session.pop('token', None)
-            session.modified = True
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
+    if 'token' not in session:
+        logger.debug("No token in session")
+        return None
+    try:
+        creds = Credentials.from_authorized_user_info(eval(session['token']), SCOPES)
+        logger.debug("Loaded credentials from session")
+        if not creds.valid:
+            if creds.expired and creds.refresh_token:
                 logger.debug("Attempting to refresh OAuth token")
                 creds.refresh(Request())
                 session['token'] = creds.to_json()
                 session.modified = True
                 logger.debug("Refreshed OAuth token successfully")
-            except Exception as e:
-                logger.error(f"Error refreshing token: {e}")
+            else:
+                logger.debug("Credentials invalid and no refresh token")
                 session.pop('token', None)
                 session.modified = True
-                logger.debug("Redirecting to login due to token refresh failure")
-                return None  # Return None to trigger login
-        else:
-            logger.debug("No valid credentials, need to authorize")
-            return None
-    try:
+                return None
         if set(creds.scopes) != set(SCOPES):
             logger.warning(f"Scope mismatch. Token scopes: {creds.scopes}, Required: {SCOPES}")
             session.pop('token', None)
             session.modified = True
-            logger.debug("Redirecting to login due to scope mismatch")
             return None
         service = build('gmail', 'v1', credentials=creds)
         logger.debug("Gmail service initialized successfully")
         return service
     except Exception as e:
-        logger.error(f"Error building Gmail service: {e}")
+        logger.error(f"Error in get_gmail_service: {e}")
         session.pop('token', None)
         session.modified = True
-        logger.debug("Redirecting to login due to service build failure")
         return None
 
 def get_gmail_service_with_token(access_token):
@@ -219,83 +208,167 @@ def is_valid_email(email):
     pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
     return re.match(pattern, email) is not None
 
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    if 'user_id' not in session:
+        logger.debug("No user_id in session, redirecting to login")
+        return redirect(url_for('login'))
+    
+    if 'token' not in session:
+        logger.debug("No token in session, redirecting to authorize")
+        return redirect(url_for('authorize'))
+    
+    conn = get_db_connection()
+    if not conn:
+        logger.error("Database connection failed")
+        flash('Database connection failed.', 'error')
+        return redirect(url_for('login'))
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT email FROM users WHERE id = %s", (session['user_id'],))
+            user = cur.fetchone()
+        if not user:
+            logger.debug("User not found, clearing session")
+            session.clear()
+            flash('User not found. Please log in again.', 'error')
+            return redirect(url_for('login'))
+        db_user_email = user[0]
+    except Exception as e:
+        logger.error(f"Error fetching user: {e}")
+        flash('Database error.', 'error')
+        return redirect(url_for('login'))
+    finally:
+        conn.close()
+    
+    service = get_gmail_service()
+    if not service:
+        logger.debug("Failed to get Gmail service, redirecting to authorize")
+        return redirect(url_for('authorize'))
+    
+    try:
+        profile = service.users().getProfile(userId='me').execute()
+        google_email = profile['emailAddress']
+        if google_email != db_user_email:
+            logger.warning(f"Email mismatch. Google: {google_email}, DB: {db_user_email}")
+            flash('Authenticated email does not match registered email.', 'error')
+            session.clear()
+            return redirect(url_for('login'))
+    except HttpError as e:
+        logger.error(f"Error fetching user profile: {e}")
+        flash('Failed to verify email with Google.', 'error')
+        return redirect(url_for('authorize'))
+    
+    if request.method == 'POST':
+        recipient_email = request.form.get('recipient_email', '').strip()
+        reply_to = request.form.get('reply_to', '').strip()
+        subject = request.form.get('subject', '').strip()
+        message = request.form.get('message', '').strip()
+        files = request.files.getlist('attachments')
+        
+        if not is_valid_email(recipient_email):
+            flash('Invalid recipient email address.', 'error')
+            return render_template('index.html', user_email=google_email)
+        if reply_to and not is_valid_email(reply_to):
+            flash('Invalid reply-to email address.', 'error')
+            return render_template('index.html', user_email=google_email)
+        
+        try:
+            msg = create_email(google_email, recipient_email, reply_to, subject, message, files)
+            if send_email(service, msg):
+                flash('Email sent successfully!', 'success')
+            else:
+                flash('Failed to send email.', 'error')
+        except ValueError as ve:
+            logger.error(f"ValueError in email sending: {ve}")
+            flash(str(ve), 'error')
+        except Exception as e:
+            logger.error(f"Email sending error: {e}")
+            flash(f"An error occurred: {str(e)}", 'error')
+        
+        return render_template('index.html', user_email=google_email)
+    
+    return render_template('index.html', user_email=google_email)
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # Clear token if present to avoid scope issues
-    if 'token' in session:
-        logger.debug("Clearing existing token on login")
-        session.pop('token', None)
-        session.modified = True
-
-    if 'user_id' in session:
-        logger.debug("User already logged in, redirecting to index")
+    # Clear token to prevent scope mismatches
+    session.pop('token', None)
+    session.modified = True
+    
+    if 'user_id' in session and 'token' in session:
+        logger.debug("User already authenticated, redirecting to index")
         return redirect(url_for('index'))
     
     if request.method == 'POST':
-        email = request.form.get('email').strip()
+        email = request.form.get('email', '').strip()
         if not is_valid_email(email):
             flash('Invalid email format.', 'error')
             return render_template('login.html')
         
         conn = get_db_connection()
-        if conn:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT id, email FROM users WHERE email = %s", (email,))
-                    user = cur.fetchone()
-                if user:
-                    session['user_id'] = user[0]
-                    session['user_email'] = user[1]
-                    session.permanent = True
-                    session.modified = True
-                    logger.debug(f"User logged in: {email}, Session: {session}")
-                    flash('Logged in successfully! Please authorize Gmail access.', 'success')
-                    return redirect(url_for('authorize'))
-                else:
-                    flash('Email not registered. Please register.', 'error')
-            except Exception as e:
-                logger.error(f"Login error: {e}")
-                flash('Database error during login.', 'error')
-            finally:
-                conn.close()
-        else:
+        if not conn:
             flash('Database connection failed.', 'error')
+            return render_template('login.html')
+        
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, email FROM users WHERE email = %s", (email,))
+                user = cur.fetchone()
+            if user:
+                session['user_id'] = user[0]
+                session['user_email'] = user[1]
+                session.permanent = True
+                session.modified = True
+                logger.debug(f"User logged in: {email}, Session: {session}")
+                flash('Logged in successfully! Please authorize Gmail access.', 'success')
+                return redirect(url_for('authorize'))
+            else:
+                flash('Email not registered. Please register.', 'error')
+        except Exception as e:
+            logger.error(f"Login error: {e}")
+            flash('Database error during login.', 'error')
+        finally:
+            conn.close()
+        return render_template('login.html')
     
     return render_template('login.html')
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    if 'user_id' in session:
-        logger.debug("User already logged in, redirecting to index")
+    if 'user_id' in session and 'token' in session:
+        logger.debug("User already authenticated, redirecting to index")
         return redirect(url_for('index'))
     
     if request.method == 'POST':
-        email = request.form.get('email').strip()
+        email = request.form.get('email', '').strip()
         if not is_valid_email(email):
             flash('Invalid email format.', 'error')
             return render_template('register.html')
         
         conn = get_db_connection()
-        if conn:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT id FROM users WHERE email = %s", (email,))
-                    if cur.fetchone():
-                        flash('Email already registered.', 'error')
-                        return render_template('register.html')
-                    cur.execute("INSERT INTO users (email) VALUES (%s) RETURNING id", (email,))
-                    user_id = cur.fetchone()[0]
-                    conn.commit()
-                logger.debug(f"User registered: {email}")
-                flash('Registration successful! Please log in.', 'success')
-                return redirect(url_for('login'))
-            except Exception as e:
-                logger.error(f"Registration error: {e}")
-                flash('Database error during registration.', 'error')
-            finally:
-                conn.close()
-        else:
+        if not conn:
             flash('Database connection failed.', 'error')
+            return render_template('register.html')
+        
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+                if cur.fetchone():
+                    flash('Email already registered.', 'error')
+                    return render_template('register.html')
+                cur.execute("INSERT INTO users (email) VALUES (%s) RETURNING id", (email,))
+                user_id = cur.fetchone()[0]
+                conn.commit()
+            logger.debug(f"User registered: {email}")
+            flash('Registration successful! Please log in.', 'success')
+            return redirect(url_for('login'))
+        except Exception as e:
+            logger.error(f"Registration error: {e}")
+            flash('Database error during registration.', 'error')
+        finally:
+            conn.close()
+        return render_template('register.html')
     
     return render_template('register.html')
 
@@ -396,83 +469,6 @@ def clear_session():
     flash('Session cleared.', 'success')
     return redirect(url_for('login'))
 
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    if 'user_id' not in session:
-        logger.debug("No user_id in session, redirecting to login")
-        return redirect(url_for('login'))
-    
-    conn = get_db_connection()
-    if conn:
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT email FROM users WHERE id = %s", (session['user_id'],))
-                user = cur.fetchone()
-            if not user:
-                session.clear()
-                logger.debug("User not found, session cleared")
-                flash('User not found. Please log in again.', 'error')
-                return redirect(url_for('login'))
-            db_user_email = user[0]
-        except Exception as e:
-            logger.error(f"Error fetching user: {e}")
-            flash('Database error.', 'error')
-            return redirect(url_for('login'))
-        finally:
-            conn.close()
-    else:
-        flash('Database connection failed.', 'error')
-        return redirect(url_for('login'))
-    
-    service = get_gmail_service()
-    if not service:
-        logger.debug("No Gmail service, redirecting to authorize")
-        return redirect(url_for('authorize'))
-    
-    try:
-        profile = service.users().getProfile(userId='me').execute()
-        google_email = profile['emailAddress']
-        if google_email != db_user_email:
-            logger.warning(f"Email mismatch. Google: {google_email}, DB: {db_user_email}")
-            flash('Authenticated email does not match registered email.', 'error')
-            session.clear()
-            return redirect(url_for('login'))
-    except HttpError as e:
-        logger.error(f"Error fetching user profile: {e}")
-        flash('Failed to verify email with Google.', 'error')
-        return redirect(url_for('authorize'))
-    
-    if request.method == 'POST':
-        recipient_email = request.form.get('recipient_email').strip()
-        reply_to = request.form.get('reply_to').strip()
-        subject = request.form.get('subject').strip()
-        message = request.form.get('message').strip()
-        files = request.files.getlist('attachments')
-        
-        if not is_valid_email(recipient_email):
-            flash('Invalid recipient email address.', 'error')
-            return render_template('index.html', user_email=google_email)
-        if reply_to and not is_valid_email(reply_to):
-            flash('Invalid reply-to email address.', 'error')
-            return render_template('index.html', user_email=google_email)
-        
-        try:
-            msg = create_email(google_email, recipient_email, reply_to, subject, message, files)
-            if send_email(service, msg):
-                flash('Email sent successfully!', 'success')
-            else:
-                flash('Invalid recipient email.', 'error')
-        except ValueError as ve:
-            logger.error(f"ValueError in email sending: {ve}")
-            flash(str(ve), 'error')
-        except Exception as e:
-            logger.error(f"Email sending error: {e}")
-            flash(f"An error occurred: {str(e)}", 'error')
-        
-        return redirect(url_for('index'))
-    
-    return render_template('index.html', user_email=google_email)
-
 @app.route('/backend_service', methods=['POST'])
 def backend_service():
     logger.debug("Received request to /backend_service")
@@ -565,4 +561,4 @@ def backend_service():
         return jsonify({"error": f"Failed to send email: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
