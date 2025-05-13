@@ -18,6 +18,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 import base64
 import logging
+import json
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 from flask_cors import CORS
@@ -37,11 +38,12 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')
 app.config['SESSION_PERMANENT'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-# Set to False for local testing; True for production (HTTPS)
-app.config['SESSION_COOKIE_SECURE'] = False  # Change to True on Vercel
+app.config['SESSION_COOKIE_SECURE'] = True  # Required for HTTPS on Render
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_DOMAIN'] = None  # Let browser infer domain
 CORS(app, resources={
     r"/backend_service": {
-        "origins": ["https://meet-sync-backend-1.vercel.app", "http://localhost:8080"],
+        "origins": [os.getenv('RENDER_EXTERNAL_URL', 'http://localhost:8080')],
         "allow_headers": ["Authorization", "Content-Type"],
         "methods": ["POST", "OPTIONS"],
         "supports_credentials": True
@@ -104,13 +106,14 @@ def get_gmail_service():
         logger.debug("No token in session")
         return None
     try:
-        creds = Credentials.from_authorized_user_info(session['token'], SCOPES)
+        token_data = json.loads(session['token'])
+        creds = Credentials.from_authorized_user_info(token_data, SCOPES)
         logger.debug("Loaded credentials from session")
         if not creds.valid:
             if creds.expired and creds.refresh_token:
                 logger.debug("Attempting to refresh OAuth token")
                 creds.refresh(Request())
-                session['token'] = creds.to_json()
+                session['token'] = json.dumps(creds.to_json())
                 session.modified = True
                 logger.debug("Refreshed OAuth token successfully")
             else:
@@ -229,6 +232,8 @@ def index():
         logger.debug("No token in session, redirecting to authorize")
         return redirect(url_for('authorize'))
     
+    logger.debug(f"Session data: user_id={session.get('user_id')}, token={session.get('token')[:50]}...")
+    
     conn = get_db_connection()
     if not conn:
         logger.error("Database connection failed")
@@ -310,7 +315,7 @@ def index():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     logger.debug("Accessed login route")
-    # Clear token to prevent scope mismatches
+    # Clear token and state to prevent scope mismatches
     session.pop('token', None)
     session.pop('state', None)
     session.modified = True
@@ -446,6 +451,7 @@ def oauth2callback():
         error = query_params['error'][0]
         logger.error(f"Google OAuth error: {error}")
         flash(f"Google authorization failed: {error}. Please try again.", 'error')
+        session.clear()
         return redirect(url_for('login'))
     
     state = session.get('state')
@@ -472,7 +478,7 @@ def oauth2callback():
         logger.debug(f"Fetching token with response URL: {request.url}")
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
-        session['token'] = credentials.to_json()
+        session['token'] = json.dumps(credentials.to_json())
         session.modified = True
         logger.debug("OAuth token fetched and stored in session")
         session.pop('state', None)
@@ -511,7 +517,7 @@ def backend_service():
 
     access_token = auth_header.split(' ')[1]
     if not access_token:
-        logger.error("No access token provided")
+        logger.error("No access token provided HALLU")
         return jsonify({"error": "No access token provided"}), 401
 
     try:
@@ -592,4 +598,4 @@ def backend_service():
         return jsonify({"error": f"Failed to send email: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
